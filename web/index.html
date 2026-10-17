@@ -124,7 +124,7 @@
     <header>
       <div class="title-group">
         <h1>☁️ I Love GCP — Cloud Web Service</h1>
-        <p>VPC 격리 네트워크 · 최소권한 IAM · 방화벽 인바운드 통제 · OrbStack 컨테이너 배포 완료</p>
+        <p>VPC 격리 네트워크 · 최소권한 IAM · 방화벽 인바운드 통제 · OrbStack Linux VM (Nginx) 배포 완료</p>
       </div>
       <div class="badge-ok">
         <span class="dot"></span>
@@ -145,12 +145,12 @@
       </div>
 
       <div class="card">
-        <h2>🖥️ 2. 컴퓨트 &amp; OrbStack 컨테이너</h2>
+        <h2>🖥️ 2. 컴퓨트 &amp; OrbStack Linux VM</h2>
         <dl>
           <dt>VM Instance</dt><dd>mission-web-server (e2-micro)</dd>
-          <dt>OS / Boot Disk</dt><dd>Ubuntu 22.04 LTS / 10GiB pd-balanced</dd>
-          <dt>Container Engine</dt><dd>OrbStack (ilovegcp-web:latest)</dd>
-          <dt>Web Server</dt><dd>Nginx 1.27 (0.0.0.0:80 → 80/tcp)</dd>
+          <dt>OS / Boot Disk</dt><dd>Ubuntu LTS / 10GiB pd-balanced</dd>
+          <dt>VM Runtime</dt><dd>OrbStack Linux Machine (orbctl)</dd>
+          <dt>Web Server</dt><dd>Nginx 1.24 (0.0.0.0:80 systemd)</dd>
           <dt>Network Tag</dt><dd>web-server</dd>
         </dl>
       </div>

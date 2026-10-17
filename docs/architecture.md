@@ -1,4 +1,4 @@
-# 아키텍처 설계서 (Google Cloud Platform)
+# 아키텍처 설계서 (Google Cloud Platform & OrbStack Linux VM)
 
 - **이미지 다이어그램**: [`docs/architecture.png`](architecture.png)
 - **PDF 다이어그램**: [`docs/architecture.pdf`](architecture.pdf)
@@ -16,10 +16,10 @@
 | **게이트웨이** | Internet Gateway (IGW) | **Default Internet Gateway** | `default-internet-gateway` | VPC와 외부 인터넷 간 양방향(인바운드/아웃바운드) 통신을 중계하는 가상 게이트웨이 |
 | **라우팅** | Route Table (`0.0.0.0/0 → IGW`) | **VPC Routes** | `0.0.0.0/0` → `default-internet-gateway` | 서브넷 내부(`10.0.1.0/24`)는 로컬 라우팅, 외부 목적지(`0.0.0.0/0`)는 인터넷 게이트웨이로 전달 |
 | **퍼블릭 IP** | Elastic IP (EIP) | **Static External IP** | `mission-static-ip` (`34.64.178.42`) | VM 재시작 시에도 변경되지 않는 서울 리전 고정 공인 IP 예약 및 바인딩 |
-| **컴퓨트 & 스토리지** | EC2 (`t2/t3.micro`) + EBS (`8~10GiB`) | **Compute Engine VM + Persistent Disk** | `mission-web-server` (`e2-micro`, Ubuntu 22.04 LTS, `pd-balanced` 10GiB) | 웹 서버 및 OrbStack 컨테이너 런타임이 구동되는 가상 머신 (삭제 시 부팅 디스크 자동 해제 설정) |
+| **컴퓨트 & 스토리지** | EC2 (`t2/t3.micro`) + EBS (`8~10GiB`) | **Compute Engine VM + Persistent Disk** | `mission-web-server` (`e2-micro`, Ubuntu LTS, `pd-balanced` 10GiB) | Nginx 웹 서버가 구동되는 가상 머신 (삭제 시 부팅 디스크 자동 해제 설정) |
 | **보안 그룹** | Security Group (`80`, `22`) | **VPC Firewall Rules + Network Tag** | `allow-http` (`tcp:80`, `0.0.0.0/0`)<br>`allow-ssh-my-ip` (`tcp:22`, `121.135.181.35/32`) | `target-tags=web-server`가 부착된 인스턴스에 대해서만 HTTP(전체) 및 SSH(내 개인 IP `/32`) 인바운드 허용 |
 | **권한 관리** | IAM User/Role (최소권한) | **IAM Service Account + Predefined Roles** | `mission-deployer@ks-work-7788.iam.gserviceaccount.com` | `Owner`/`Editor` 관리자 권한을 배제하고 Compute/Network 구성에 필요한 최소 권한만 부여 |
-| **컨테이너(보너스)** | Docker Container | **OrbStack Container Engine** | `ilovegcp-web:latest` (`nginx:1.27-alpine`, `0.0.0.0:80->80/tcp`) | 가볍고 빠른 OrbStack 런타임 위에서 Nginx 웹 서비스 및 `/health` 엔드포인트 컨테이너 구동 |
+| **격리 실행 환경** | Linux VM / Container | **OrbStack Linux Machine (`orb`)** | `ubuntu` (`noble`, `0.0.0.0:80`, `nginx.service`) | Docker 없이 순수 OrbStack Linux 머신(`orb`) 위에서 systemd 기반 Nginx 웹 서비스 및 `/health` 구동 |
 
 ---
 
@@ -57,11 +57,12 @@
 │  │ Public Subnet: mission-public-subnet (10.0.1.0/24, 서울)     │  │
 │  │                                                             │  │
 │  │  ┌───────────────────────────────────────────────────────┐  │  │
-│  │  │ Compute Engine VM: mission-web-server (e2-micro)      │  │  │
+│  │  │ Compute Engine VM / OrbStack Linux Machine            │  │  │
+│  │  │ mission-web-server (e2-micro, Ubuntu LTS, 10GiB)      │  │  │
 │  │  │ Internal IP: 10.0.1.2 / External IP: 34.64.178.42     │  │  │
 │  │  │                                                       │  │  │
 │  │  │  ┌─────────────────────────────────────────────────┐  │  │  │
-│  │  │  │ OrbStack Container: ilovegcp-web (0.0.0.0:80)   │  │  │  │
+│  │  │  │ Native Nginx Web Server (0.0.0.0:80, systemd)   │  │  │  │
 │  │  │  │  • GET /       → 200 OK (I Love GCP 웹 대시보드) │  │  │  │
 │  │  │  │  • GET /health → 200 OK ("OK")                  │  │  │  │
 │  │  │  └─────────────────────────────────────────────────┘  │  │  │
@@ -75,4 +76,4 @@
 3. **방화벽 규칙 검사 (VPC Firewall)**:
    - `tcp:80` 요청은 소스 IP와 무관하게(`0.0.0.0/0`) `allow-http` 규칙에 의해 허용됩니다.
    - `tcp:22`(SSH) 요청은 학습자 개인 공인 IP(`121.135.181.35/32`)와 일치할 때만 `allow-ssh-my-ip` 규칙에 의해 허용되며, 타 IP의 접근 시도는 암묵적 거부(`implied deny ingress`) 규칙으로 즉시 드롭됩니다.
-4. **컨테이너 포트 포워딩 및 응답 반환**: VM의 `0.0.0.0:80` 소켓에서 대기 중인 OrbStack 컨테이너(`ilovegcp-web`) 내 Nginx가 요청을 처리하여 `200 OK` 응답을 생성하고, 역순 경로(`VM → Route Table(0.0.0.0/0) → default-internet-gateway → 클라이언트`)로 반환합니다.
+4. **웹 서버 처리 및 응답 반환**: VM의 `0.0.0.0:80` 소켓에서 대기 중인 Nginx 데몬(`nginx.service`)이 요청을 처리하여 `200 OK` 응답을 생성하고, 역순 경로(`VM → Route Table(0.0.0.0/0) → default-internet-gateway → 클라이언트`)로 반환합니다.

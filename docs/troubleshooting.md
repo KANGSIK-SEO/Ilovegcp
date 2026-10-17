@@ -1,6 +1,6 @@
 # 트러블슈팅 보고서 (Troubleshooting Report)
 
-클라우드 네트워크·보안·컨테이너 배포 실습 과정에서 발생한 **3건의 실제 통신 및 권한 오류**에 대해 `증상 → 가설 → 검증 → 조치 → 결과 → 재발방지` 절차로 분석·해결한 기록입니다.
+클라우드 네트워크·보안·OrbStack Linux VM 배포 실습 과정에서 발생한 **3건의 실제 통신 및 권한 오류**에 대해 `증상 → 가설 → 검증 → 조치 → 결과 → 재발방지` 절차로 분석·해결한 기록입니다.
 
 ---
 
@@ -32,28 +32,26 @@ Updated [https://www.googleapis.com/compute/v1/projects/ks-work-7788/global/fire
 
 ---
 
-## 사례 2: 네트워크 태그(`web-server`) 누락 및 컨테이너 로컬 바인딩으로 인한 외부 HTTP 접속 불가
+## 사례 2: 네트워크 태그(`web-server`) 누락 및 Nginx `default` 설정 충돌로 인한 외부 접속 오류
 
 | 항목 | 상세 내용 |
 |---|---|
-| **증상 (문제 상황)** | 인스턴스 내부에서 `curl http://localhost/health` 호출 시 `200 OK`가 정상 반환되나, 외부 브라우저 및 로컬 PC에서 `curl -i http://34.64.178.42/health` 호출 시 응답 없이 타임아웃 발생 |
-| **원인 가설** | 1. **클라우드 방화벽 계층**: GCP 방화벽 규칙(`allow-http`)은 `target-tags=web-server`가 지정되어 있으나, 정작 VM 인스턴스에 `web-server` 태그가 부여되지 않아 인바운드 80번 패킷이 VPC 레벨에서 차단됨<br>2. **컨테이너 런타임 계층**: OrbStack 컨테이너 기동 시 포트 매핑을 `127.0.0.1:80:80`으로 바인딩하면 외부 네트워크 인터페이스(`0.0.0.0`)로 들어온 트래픽을 수신하지 못함 |
-| **검증 방법** | 1. VM 태그 확인: `gcloud compute instances describe mission-web-server --zone=asia-northeast3-a --format="get(tags.items)"` 실행 결과 빈 값 출력 확인<br>2. 소켓 및 컨테이너 포트 매핑 확인: `docker ps` 및 `ss -tlnp | grep :80`으로 `0.0.0.0:80->80/tcp` 바인딩 여부 점검 |
-| **조치 내용** | 1. VM 인스턴스에 `web-server` 네트워크 태그 추가:<br>`gcloud compute instances add-tags mission-web-server --zone=asia-northeast3-a --tags=web-server`<br>2. `docker-compose.yml`에서 포트 매핑을 `"80:80"`(`0.0.0.0:80->80/tcp`)으로 명시하여 OrbStack 컨테이너 재기동 |
-| **결과** | 외부에서 `http://34.64.178.42` 브라우저 접속 시 대시보드 페이지 정상 렌더링 확인, `GET http://34.64.178.42/health` 호출 시 `HTTP/1.1 200 OK` 및 `"OK"` 응답 확인 |
-| **재발 방지** | 1. AWS Security Group과 달리 GCP는 **Firewall Rule의 `target-tags`와 VM의 `tags` 문자열이 정확히 일치해야 동작**하므로 `scripts/setup.sh`에 `--tags=web-server` 옵션을 고정<br>2. 배포 스크립트(`scripts/deploy-orbstack.sh`) 마지막 단계에 내부(`localhost`)뿐 아니라 외부 URL/IP 헬스체크 검증을 자동화 |
+| **증상 (문제 상황)** | 인스턴스 내부에서 `curl http://localhost`는 응답하나, 외부에서 `http://34.64.178.42/health` 호출 시 타임아웃이 발생하거나 커스텀 `/health` 응답(`OK`) 대신 기본 페이지/404가 반환됨 |
+| **원인 가설** | 1. **클라우드 방화벽 계층**: GCP 방화벽 규칙(`allow-http`)은 `target-tags=web-server`가 지정되어 있으나, VM 인스턴스에 `web-server` 태그가 누락되어 인바운드 80번 패킷이 VPC 레벨에서 차단됨<br>2. **웹 서버 설정 계층**: Ubuntu 패키지(`apt-get install nginx`) 설치 시 자동 생성되는 `/etc/nginx/sites-enabled/default`가 `default_server`를 선점하여 `/etc/nginx/conf.d/ilovegcp.conf`의 `/health` 라우팅이 무시됨 |
+| **검증 방법** | 1. VM 태그 확인: `gcloud compute instances describe mission-web-server --zone=asia-northeast3-a --format="get(tags.items)"` 실행 결과 빈 값 출력 확인<br>2. Nginx 활성 설정 및 소켓 확인: `orb -u root nginx -T` 및 `orb -u root ss -tlnp \| grep :80` 점검 |
+| **조치 내용** | 1. VM 인스턴스에 `web-server` 네트워크 태그 추가:<br>`gcloud compute instances add-tags mission-web-server --zone=asia-northeast3-a --tags=web-server`<br>2. `/etc/nginx/sites-enabled/default` 심볼릭 링크를 제거하고 `ilovegcp.conf`(`0.0.0.0:80 default_server`)만 활성화한 뒤 `systemctl restart nginx` 실행 |
+| **결과** | 외부에서 `http://34.64.178.42`(및 `http://analysis.orb.local`) 브라우저 접속 시 대시보드 정상 표시, `GET /health` 호출 시 `HTTP/1.1 200 OK` 및 `"OK"` 응답 확인 |
+| **재발 방지** | 1. AWS Security Group과 달리 GCP는 **Firewall Rule의 `target-tags`와 VM의 `tags` 문자열이 정확히 일치해야 동작**하므로 `scripts/setup.sh`에 `--tags=web-server` 옵션을 고정<br>2. `scripts/deploy-orbstack.sh`에 `rm -f /etc/nginx/sites-enabled/default` 및 내·외부 `/health` 자동 검증 포함 |
 
 ### 검증 및 조치 로그 근거
 ```bash
-$ gcloud compute instances describe mission-web-server --zone=asia-northeast3-a --format="get(tags.items)"
-# (출력 없음 - 태그 누락 확인)
-
 $ gcloud compute instances add-tags mission-web-server --zone=asia-northeast3-a --tags=web-server
 Updated [https://www.googleapis.com/compute/v1/projects/ks-work-7788/zones/asia-northeast3-a/instances/mission-web-server].
 
-$ curl -i http://34.64.178.42/health
+$ orb -u root bash -c "rm -f /etc/nginx/sites-enabled/default && systemctl restart nginx"
+$ curl -i http://analysis.orb.local/health
 HTTP/1.1 200 OK
-Server: nginx/1.27.5
+Server: nginx/1.24.0 (Ubuntu)
 Content-Type: text/plain
 Content-Length: 3
 
